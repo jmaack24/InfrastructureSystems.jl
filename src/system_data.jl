@@ -708,7 +708,6 @@ function _check_transform_single_time_series(
         time_series_type = SingleTimeSeries,
         resolution = resolution,
     )
-    system_params = get_forecast_parameters(data.time_series_manager.metadata_store)
     components_with_params_and_metadata = NamedTuple[]
     for item in items
         params = _check_single_time_series_transformed_parameters(
@@ -716,6 +715,11 @@ function _check_transform_single_time_series(
             DeterministicSingleTimeSeries,
             horizon,
             interval,
+        )
+        system_params = get_forecast_parameters(
+            data.time_series_manager.metadata_store;
+            resolution = params.resolution,
+            interval = params.interval,
         )
         check_params_compatibility(system_params, params)
         component = get_component(data, item.owner_uuid)
