@@ -3,13 +3,14 @@ const METADATA_TABLE_NAME = "time_series_metadata"
 const KEY_VALUE_TABLE_NAME = "key_value_store"
 const DB_FILENAME = "time_series_metadata.db"
 # This version is also used in the Python package infrasys.
-const TS_METADATA_FORMAT_VERSION = "1.0.0"
+const TS_METADATA_FORMAT_VERSION = "1.1.0"
 const TS_DB_INDEXES = Dict(
     "by_c_n_tst_features" => [
         "owner_uuid",
         "time_series_type",
         "name",
         "resolution",
+        "interval",
         "features",
     ],
     "by_ts_uuid" => ["time_series_uuid"],
@@ -19,6 +20,7 @@ const TS_DB_INDEXES = Dict(
     has_name::Bool
     num_possible_types::Int
     has_resolution::Bool
+    has_interval::Bool
     has_features::Bool
     feature_filter::Union{Nothing, String} = nothing
 end
@@ -421,9 +423,13 @@ function _create_indexes!(store::TimeSeriesMetadataStore)
     # 1. Optimize for these user queries with indexes:
     #    1a. all time series attached to one component/attribute
     #    1b. time series for one component/attribute + name + type + resolution
-    #    1c. time series for one component/attribute with all features
+    #    1c. time series for one component/attribute + name + type + resolution + interval
+    #    1d. time series for one component/attribute with all features
     # 2. Optimize for checks at system.add_time_series. Use all fields and features.
     # 3. Optimize for returning all metadata for a time series UUID.
+    # Note: interval is NULL for static time series. SQLite treats each NULL as distinct
+    # in unique indexes, so SQL-level uniqueness for static time series is enforced by the
+    # application-level check in add_time_series! rather than this index.
 
     _drop_all_indexes!(store.db)
     SQLite.createindex!(
@@ -743,6 +749,7 @@ function get_metadata(
     time_series_type::Type{<:TimeSeriesData},
     name::String;
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     metadata = _try_get_time_series_metadata_by_full_params(
@@ -751,6 +758,7 @@ function get_metadata(
         time_series_type,
         name;
         resolution = resolution,
+        interval = interval,
         features...,
     )
     !isnothing(metadata) && return metadata
@@ -761,13 +769,18 @@ function get_metadata(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         features...,
     )
     len = length(metadata_items)
     if len == 0
         throw(ArgumentError("No matching metadata is stored."))
     elseif len > 1
-        throw(ArgumentError("Found more than one matching metadata: $len"))
+        throw(
+            ArgumentError(
+                "Found more than one matching metadata: $len. Try specifying the interval keyword argument to disambiguate.",
+            ),
+        )
     end
 
     return metadata_items[1]
@@ -937,9 +950,11 @@ function has_metadata(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
-    params = _make_has_metadata_params(owner, time_series_type, name, resolution)
+    params =
+        _make_has_metadata_params(owner, time_series_type, name, resolution, interval)
     if isempty(features)
         stmt = _make_has_metadata_statement!(
             store,
@@ -947,6 +962,7 @@ function has_metadata(
                 has_name = !isnothing(name),
                 num_possible_types = _get_num_possible_types(time_series_type),
                 has_resolution = !isnothing(resolution),
+                has_interval = !isnothing(interval),
                 has_features = false,
             ),
         )
@@ -961,6 +977,7 @@ function has_metadata(
             has_name = !isnothing(name),
             num_possible_types = _get_num_possible_types(time_series_type),
             has_resolution = !isnothing(resolution),
+            has_interval = !isnothing(interval),
             has_features = true,
         ),
     )
@@ -977,6 +994,7 @@ function has_metadata(
             has_name = !isnothing(name),
             num_possible_types = _get_num_possible_types(time_series_type),
             has_resolution = !isnothing(resolution),
+            has_interval = !isnothing(interval),
             has_features = true,
             feature_filter = feature_filter,
         ),
@@ -1018,6 +1036,9 @@ function _make_has_metadata_statement!(
     if key.has_resolution
         push!(where_clauses, "resolution = ?")
     end
+    if key.has_interval
+        push!(where_clauses, "interval = ?")
+    end
     if key.has_features
         if isnothing(key.feature_filter)
             push!(where_clauses, "features = ?")
@@ -1042,7 +1063,8 @@ function _make_has_metadata_params(
     owner::TimeSeriesOwners,
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing},
     name::Union{String, Nothing},
-    resolution::Union{Dates.Period, Nothing};
+    resolution::Union{Dates.Period, Nothing},
+    interval::Union{Dates.Period, Nothing} = nothing;
     feature_value::Union{String, Nothing} = nothing,
 )
     return (
@@ -1050,6 +1072,7 @@ function _make_has_metadata_params(
         _get_name_params(name)...,
         _get_ts_type_params(time_series_type)...,
         _get_resolution_param(resolution)...,
+        _get_interval_param(interval)...,
         _get_feature_params(feature_value)...,
     )
 end
@@ -1058,6 +1081,9 @@ _get_name_params(::Nothing) = ()
 _get_name_params(name::String) = (name,)
 _get_resolution_param(::Nothing) = ()
 _get_resolution_param(x::Dates.Period) =
+    (to_iso_8601(is_irregular_period(x) ? x : Dates.Millisecond(x)),)
+_get_interval_param(::Nothing) = ()
+_get_interval_param(x::Dates.Period) =
     (to_iso_8601(is_irregular_period(x) ? x : Dates.Millisecond(x)),)
 _get_ts_type_params(::Nothing) = ()
 _get_ts_type_params(ts_type::Type{<:TimeSeriesData}) =
@@ -1144,12 +1170,14 @@ function list_matching_time_series_uuids(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Dates.Period, Nothing} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     where_clause, params = _make_where_clause(;
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         features...,
     )
     query = "SELECT DISTINCT time_series_uuid FROM $ASSOCIATIONS_TABLE_NAME $where_clause"
@@ -1163,6 +1191,7 @@ function list_metadata(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Dates.Period, Nothing} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     where_clause, params = _make_where_clause(
@@ -1170,6 +1199,7 @@ function list_metadata(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         features...,
     )
     query = """
@@ -1194,6 +1224,7 @@ function list_metadata_with_owner_uuid(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Dates.Period, Nothing} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     where_clause, params = _make_where_clause(
@@ -1201,6 +1232,7 @@ function list_metadata_with_owner_uuid(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         features...,
     )
     query = """
@@ -1512,6 +1544,7 @@ function _try_get_time_series_metadata_by_full_params(
     time_series_type::Type{<:TimeSeriesData},
     name::String;
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     where_clause, params = _make_where_clause(
@@ -1519,6 +1552,7 @@ function _try_get_time_series_metadata_by_full_params(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         require_full_feature_match = true,
         features...,
     )
@@ -1626,6 +1660,7 @@ function _make_where_clause(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     require_full_feature_match = false,
     features...,
 )
@@ -1635,6 +1670,7 @@ function _make_where_clause(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         require_full_feature_match = require_full_feature_match,
         params = params,
         features...,
@@ -1646,6 +1682,7 @@ function _make_where_clause(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     require_full_feature_match = false,
     params = nothing,
     features...,
@@ -1659,6 +1696,7 @@ function _make_where_clause(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         require_full_feature_match = require_full_feature_match,
         params = params,
         features...,
@@ -1670,6 +1708,7 @@ function _make_where_clause(;
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     require_full_feature_match = false,
     params = nothing,
     features...,
@@ -1688,6 +1727,10 @@ function _make_where_clause(;
     if !isnothing(resolution)
         push!(vals, "resolution = ?")
         push!(params, _serialize_period(resolution))
+    end
+    if !isnothing(interval)
+        push!(vals, "interval = ?")
+        push!(params, _serialize_period(interval))
     end
     num_possible_types = _get_num_possible_types(time_series_type)
     if num_possible_types == 1
@@ -1720,6 +1763,7 @@ function _make_where_clause(owner::TimeSeriesOwners, metadata::TimeSeriesMetadat
         time_series_type = time_series_metadata_to_data(metadata),
         name = get_name(metadata),
         resolution = get_resolution(metadata),
+        interval = get_interval(metadata),
         features...,
     )
 end
