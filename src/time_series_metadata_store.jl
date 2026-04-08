@@ -657,8 +657,12 @@ end
 # check_consistency is not implemented on StaticTimeSeries because new types may have
 # different requirments than SingleTimeSeries. Let future developers make that decision.
 
-function get_forecast_initial_times(store::TimeSeriesMetadataStore)
-    params = get_forecast_parameters(store)
+function get_forecast_initial_times(
+    store::TimeSeriesMetadataStore;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(store; resolution = resolution, interval = interval)
     isnothing(params) && return []
     return get_initial_times(params.initial_timestamp, params.count, params.interval)
 end
@@ -702,60 +706,44 @@ function get_forecast_parameters(
     )
 end
 
-function get_forecast_window_count(store::TimeSeriesMetadataStore)
-    query = """
-        SELECT
-            window_count
-        FROM $ASSOCIATIONS_TABLE_NAME
-        WHERE window_count IS NOT NULL
-        LIMIT 1
-        """
-    table = Tables.rowtable(_execute_cached(store, query))
-    return isempty(table) ? nothing : table[1].window_count
+function get_forecast_window_count(
+    store::TimeSeriesMetadataStore;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(store; resolution = resolution, interval = interval)
+    isnothing(params) && return nothing
+    return params.count
 end
 
-function get_forecast_horizon(store::TimeSeriesMetadataStore)
-    query = """
-        SELECT
-            horizon
-        FROM $ASSOCIATIONS_TABLE_NAME
-        WHERE horizon IS NOT NULL
-        LIMIT 1
-        """
-    table = Tables.rowtable(_execute_cached(store, query))
-    return isempty(table) ? nothing : from_iso_8601(table[1].horizon)
+function get_forecast_horizon(
+    store::TimeSeriesMetadataStore;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(store; resolution = resolution, interval = interval)
+    isnothing(params) && return nothing
+    return params.horizon
 end
 
-function get_forecast_initial_timestamp(store::TimeSeriesMetadataStore)
-    query = """
-        SELECT
-            initial_timestamp
-        FROM $ASSOCIATIONS_TABLE_NAME
-        WHERE horizon IS NOT NULL
-        LIMIT 1
-        """
-    table = Tables.rowtable(_execute_cached(store, query))
-    return if isempty(table)
-        nothing
-    else
-        Dates.DateTime(table[1].initial_timestamp)
-    end
+function get_forecast_initial_timestamp(
+    store::TimeSeriesMetadataStore;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(store; resolution = resolution, interval = interval)
+    isnothing(params) && return nothing
+    return params.initial_timestamp
 end
 
-function get_forecast_interval(store::TimeSeriesMetadataStore)
-    query = """
-        SELECT
-            interval
-        FROM $ASSOCIATIONS_TABLE_NAME
-        WHERE interval IS NOT NULL
-        LIMIT 1
-        """
-    table = Tables.rowtable(_execute_cached(store, query))
-    return if isempty(table)
-        nothing
-    else
-        from_iso_8601(table[1].interval)
-    end
+function get_forecast_interval(
+    store::TimeSeriesMetadataStore;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(store; resolution = resolution, interval = interval)
+    isnothing(params) && return nothing
+    return params.interval
 end
 
 """

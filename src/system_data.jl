@@ -1319,16 +1319,16 @@ function get_masked_component(data::SystemData, uuid::Base.UUID)
     return nothing
 end
 
-get_forecast_initial_times(data::SystemData) =
-    get_forecast_initial_times(data.time_series_manager.metadata_store)
-get_forecast_window_count(data::SystemData) =
-    get_forecast_window_count(data.time_series_manager.metadata_store)
-get_forecast_horizon(data::SystemData) =
-    get_forecast_horizon(data.time_series_manager.metadata_store)
-get_forecast_initial_timestamp(data::SystemData) =
-    get_forecast_initial_timestamp(data.time_series_manager.metadata_store)
-get_forecast_interval(data::SystemData) =
-    get_forecast_interval(data.time_series_manager.metadata_store)
+get_forecast_initial_times(data::SystemData; kwargs...) =
+    get_forecast_initial_times(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_window_count(data::SystemData; kwargs...) =
+    get_forecast_window_count(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_horizon(data::SystemData; kwargs...) =
+    get_forecast_horizon(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_initial_timestamp(data::SystemData; kwargs...) =
+    get_forecast_initial_timestamp(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_interval(data::SystemData; kwargs...) =
+    get_forecast_interval(data.time_series_manager.metadata_store; kwargs...)
 
 get_time_series_resolutions(
     data::SystemData;
@@ -1338,8 +1338,16 @@ get_time_series_resolutions(
     time_series_type = time_series_type,
 )
 
-function get_forecast_total_period(data::SystemData)
-    params = get_forecast_parameters(data.time_series_manager.metadata_store)
+function get_forecast_total_period(
+    data::SystemData;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(
+        data.time_series_manager.metadata_store;
+        resolution = resolution,
+        interval = interval,
+    )
     isnothing(params) && return Dates.Second(0)
     return get_total_period(
         params.initial_timestamp,
