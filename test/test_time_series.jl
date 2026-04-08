@@ -338,7 +338,8 @@ end
         other_time3 => rand(horizon_count3),
     )
     forecast3 = IS.Deterministic(; data = data3, name = name3, resolution = resolution3)
-    @test_throws IS.ConflictingInputsError IS.add_time_series!(sys, component, forecast3)
+    key3 = IS.add_time_series!(sys, component, forecast3)
+    @test key3.horizon == horizon_count3 * resolution3
 end
 
 @testset "Test add Deterministic Cost Timeseries" begin
@@ -2939,7 +2940,7 @@ end
     forecast = IS.Deterministic(; data = data, name = name, resolution = resolution)
     IS.add_time_series!(sys, component, forecast)
 
-    # Conflicting initial time
+    # Different initial time implies different interval, which is a separate group.
     initial_time2 = Dates.DateTime("2020-09-02")
     name = "test2"
     data =
@@ -2949,23 +2950,19 @@ end
         )
 
     forecast = IS.Deterministic(; data = data, name = name, resolution = resolution)
-    @test_throws IS.ConflictingInputsError IS.add_time_series!(sys, component, forecast)
+    IS.add_time_series!(sys, component, forecast)
 
-    # As of PSY 4.0, different resolutions are allowed.
+    # Different resolutions are allowed as separate (resolution, interval) groups.
     resolution2 = Dates.Minute(5)
-    name = "test2"
+    name = "test4"
     data =
         SortedDict{Dates.DateTime, Vector{Float64}}(
             initial_time => ones(horizon_count),
             second_time => ones(horizon_count),
         )
 
-    forecast = IS.Deterministic(; data = data, name = name, resolution = resolution)
-    IS.add_time_series!(sys, component, forecast)
-
-    # Conflicting horizon
     forecast = IS.Deterministic(; data = data, name = name, resolution = resolution2)
-    @test_throws IS.ConflictingInputsError IS.add_time_series!(sys, component, forecast)
+    IS.add_time_series!(sys, component, forecast)
 
     # Conflicting count
     name = "test3"
@@ -4635,6 +4632,111 @@ end
             ),
         ) == IS.get_data(params.forecast1)
     end
+end
+
+@testset "Test Deterministic retrieval with multiple intervals" begin
+    sys = IS.SystemData()
+    component = IS.TestComponent("Component1", 1)
+    IS.add_component!(sys, component)
+
+    initial_time = Dates.DateTime("2020-09-01")
+    resolution = Dates.Minute(5)
+    horizon_count = 12
+    f_name = "max_active_power"
+
+    # Two forecasts with same resolution/name/horizon but different intervals.
+    # Both must have the same window count and initial_timestamp for system compatibility.
+    interval1 = Dates.Hour(1)
+    interval2 = Dates.Day(1)
+
+    times1 = [initial_time, initial_time + interval1]
+    data1 = SortedDict(t => rand(horizon_count) for t in times1)
+    f1 = IS.Deterministic(;
+        data = data1,
+        name = f_name,
+        resolution = resolution,
+        interval = interval1,
+    )
+
+    times2 = [initial_time, initial_time + interval2]
+    data2 = SortedDict(t => rand(horizon_count) for t in times2)
+    f2 = IS.Deterministic(;
+        data = data2,
+        name = f_name,
+        resolution = resolution,
+        interval = interval2,
+    )
+
+    IS.add_time_series!(sys, component, f1)
+    IS.add_time_series!(sys, component, f2)
+
+    # Retrieve by interval returns correct data
+    ts1 = IS.get_time_series(
+        IS.Deterministic,
+        component,
+        f_name;
+        interval = interval1,
+    )
+    @test IS.get_interval(ts1) == interval1
+    @test IS.get_data(ts1) == IS.get_data(f1)
+
+    ts2 = IS.get_time_series(
+        IS.Deterministic,
+        component,
+        f_name;
+        interval = interval2,
+    )
+    @test IS.get_interval(ts2) == interval2
+    @test IS.get_data(ts2) == IS.get_data(f2)
+
+    # Without interval, ambiguous query throws
+    @test_throws ArgumentError IS.get_time_series(
+        IS.Deterministic,
+        component,
+        f_name,
+    )
+
+    # get_time_series_array with interval
+    ta1 = IS.get_time_series_array(
+        IS.Deterministic,
+        component,
+        f_name;
+        interval = interval1,
+    )
+    @test length(ta1) == horizon_count
+    @test_throws ArgumentError IS.get_time_series_array(
+        IS.Deterministic,
+        component,
+        f_name,
+    )
+
+    # get_time_series_values with interval
+    vals = IS.get_time_series_values(
+        IS.Deterministic,
+        component,
+        f_name;
+        interval = interval1,
+    )
+    @test vals == TimeSeries.values(ta1)
+    @test_throws ArgumentError IS.get_time_series_values(
+        IS.Deterministic,
+        component,
+        f_name,
+    )
+
+    # get_time_series_timestamps with interval
+    ts_stamps = IS.get_time_series_timestamps(
+        IS.Deterministic,
+        component,
+        f_name;
+        interval = interval2,
+    )
+    @test length(ts_stamps) == horizon_count
+    @test_throws ArgumentError IS.get_time_series_timestamps(
+        IS.Deterministic,
+        component,
+        f_name,
+    )
 end
 
 @testset "Test removals of time series with multiple resolutions" begin
