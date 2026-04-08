@@ -613,7 +613,11 @@ function check_params_compatibility(
     store::TimeSeriesMetadataStore,
     params::ForecastParameters,
 )
-    store_params = get_forecast_parameters(store)
+    store_params = get_forecast_parameters(
+        store;
+        resolution = params.resolution,
+        interval = params.interval,
+    )
     isnothing(store_params) && return
     check_params_compatibility(store_params, params)
     return
