@@ -4739,6 +4739,102 @@ end
     )
 end
 
+@testset "Test DeterministicSingleTimeSeries with multiple intervals" begin
+    sys = IS.SystemData()
+    component = IS.TestComponent("Component1", 1)
+    IS.add_component!(sys, component)
+
+    initial_time = Dates.DateTime("2020-09-01")
+    resolution = Dates.Minute(5)
+    sts_length = 288  # 24 hours at 5-min resolution
+    data = TimeSeries.TimeArray(
+        range(initial_time; length = sts_length, step = resolution),
+        rand(sts_length),
+    )
+    sts_name = "test_sts"
+    sts = IS.SingleTimeSeries(; data = data, name = sts_name)
+    IS.add_time_series!(sys, component, sts)
+
+    horizon = Dates.Hour(1)
+    interval1 = Dates.Minute(30)
+    interval2 = Dates.Hour(1)
+
+    IS.transform_single_time_series!(
+        sys,
+        IS.DeterministicSingleTimeSeries,
+        horizon,
+        interval1;
+        delete_existing = false,
+    )
+    IS.transform_single_time_series!(
+        sys,
+        IS.DeterministicSingleTimeSeries,
+        horizon,
+        interval2;
+        delete_existing = false,
+    )
+
+    # Both transforms exist
+    @test IS.has_time_series(
+        component,
+        IS.DeterministicSingleTimeSeries,
+        sts_name;
+        interval = interval1,
+    )
+    @test IS.has_time_series(
+        component,
+        IS.DeterministicSingleTimeSeries,
+        sts_name;
+        interval = interval2,
+    )
+
+    # Retrieve by interval
+    ts1 = IS.get_time_series(
+        IS.DeterministicSingleTimeSeries,
+        component,
+        sts_name;
+        interval = interval1,
+    )
+    @test ts1 isa IS.DeterministicSingleTimeSeries
+    @test IS.get_interval(ts1) == interval1
+
+    ts2 = IS.get_time_series(
+        IS.DeterministicSingleTimeSeries,
+        component,
+        sts_name;
+        interval = interval2,
+    )
+    @test ts2 isa IS.DeterministicSingleTimeSeries
+    @test IS.get_interval(ts2) == interval2
+
+    # Without interval, ambiguous query throws
+    @test_throws ArgumentError IS.get_time_series(
+        IS.DeterministicSingleTimeSeries,
+        component,
+        sts_name,
+    )
+
+    # get_time_series_array works with interval, fails without
+    ta1 = IS.get_time_series_array(
+        IS.DeterministicSingleTimeSeries,
+        component,
+        sts_name;
+        interval = interval1,
+    )
+    @test length(ta1) > 0
+    @test_throws ArgumentError IS.get_time_series_array(
+        IS.DeterministicSingleTimeSeries,
+        component,
+        sts_name,
+    )
+
+    # Original SingleTimeSeries still accessible
+    @test IS.has_time_series(component, IS.SingleTimeSeries, sts_name)
+    @test IS.get_data(
+        IS.get_time_series(IS.SingleTimeSeries, component, sts_name),
+    ) == IS.get_data(sts)
+end
+
 @testset "Test removals of time series with multiple resolutions" begin
     params = setup_for_multi_resolution_tests()
     for (ts_type, ts_name) in
