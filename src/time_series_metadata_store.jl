@@ -67,8 +67,8 @@ function TimeSeriesMetadataStore(filename::AbstractString)
     backup(db, src)
     store = TimeSeriesMetadataStore(
         db,
-        Dict{Base.UUID, TimeSeriesMetadata}(),
-        Dict{Tuple{Bool, Bool, Int64, String}, SQLite.Stmt}(),
+        Dict{String, SQLite.Stmt}(),
+        Dict{HasMetadataQueryKey, SQLite.Stmt}(),
         Dict{Base.UUID, TimeSeriesMetadata}(),
     )
     _process_migrations_if_needed(store)
@@ -694,7 +694,7 @@ function get_forecast_parameters(
         WHERE $where_clause
         LIMIT 1
     """
-    table = Tables.rowtable(_execute(store, query, params))
+    table = Tables.rowtable(_execute_cached(store, query, params))
     isempty(table) && return nothing
     row = table[1]
     return ForecastParameters(;
@@ -785,7 +785,7 @@ function get_metadata(
     elseif len > 1
         throw(
             ArgumentError(
-                "Found more than one matching metadata: $len. Try specifying the interval keyword argument to disambiguate.",
+                "Found more than one matching metadata: $len. Try specifying additional keyword arguments (for example resolution, interval, or features) to disambiguate.",
             ),
         )
     end
@@ -1316,6 +1316,7 @@ function remove_metadata!(
     time_series_type::Union{Type{<:TimeSeriesData}, Nothing} = nothing,
     name::Union{String, Nothing} = nothing,
     resolution::Union{Dates.Period, Nothing} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     where_clause, params = _make_where_clause(
@@ -1323,6 +1324,7 @@ function remove_metadata!(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         # TODO/PERF: This can be made faster by attempting search by a full match
         # and then fallback to partial. We likely don't care about this for removing.
         require_full_feature_match = false,

@@ -234,6 +234,7 @@ function remove_time_series!(
     owner::TimeSeriesOwners,
     name::String;
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 )
     _throw_if_read_only(mgr)
@@ -242,6 +243,7 @@ function remove_time_series!(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         features...,
     )
     remove_metadata!(
@@ -250,6 +252,7 @@ function remove_time_series!(
         time_series_type = time_series_type,
         name = name,
         resolution = resolution,
+        interval = interval,
         features...,
     )
 

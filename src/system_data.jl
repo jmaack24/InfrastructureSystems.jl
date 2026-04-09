@@ -270,6 +270,7 @@ function remove_time_series!(
     owner::TimeSeriesOwners,
     name::String;
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 ) where {T <: TimeSeriesData}
     return remove_time_series!(
@@ -278,6 +279,7 @@ function remove_time_series!(
         owner,
         name;
         resolution = resolution,
+        interval = interval,
         features...,
     )
 end
@@ -299,11 +301,14 @@ Removes all time series of a particular type from a System.
   - `type::Type{<:TimeSeriesData}`: Type of time series objects to remove.
   - `resolution::Union{Nothing, Dates.Period} = nothing`: Only remove time series with this
     resolution.
+  - `interval::Union{Nothing, Dates.Period} = nothing`: Only remove time series with this
+    interval.
 """
 function remove_time_series!(
     data::SystemData,
     ::Type{T};
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
 ) where {T <: TimeSeriesData}
     _throw_if_read_only(data.time_series_manager)
     for component in iterate_components_with_time_series(
@@ -316,6 +321,10 @@ function remove_time_series!(
             time_series_type = T,
             resolution = resolution,
         )
+            ts_interval = get_interval(ts_metadata)
+            if !isnothing(interval) && ts_interval != interval
+                continue
+            end
             remove_time_series!(data, component, ts_metadata)
         end
     end
