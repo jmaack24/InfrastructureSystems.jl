@@ -270,6 +270,7 @@ function remove_time_series!(
     owner::TimeSeriesOwners,
     name::String;
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
     features...,
 ) where {T <: TimeSeriesData}
     return remove_time_series!(
@@ -278,6 +279,7 @@ function remove_time_series!(
         owner,
         name;
         resolution = resolution,
+        interval = interval,
         features...,
     )
 end
@@ -299,11 +301,14 @@ Removes all time series of a particular type from a System.
   - `type::Type{<:TimeSeriesData}`: Type of time series objects to remove.
   - `resolution::Union{Nothing, Dates.Period} = nothing`: Only remove time series with this
     resolution.
+  - `interval::Union{Nothing, Dates.Period} = nothing`: Only remove time series with this
+    interval.
 """
 function remove_time_series!(
     data::SystemData,
     ::Type{T};
     resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
 ) where {T <: TimeSeriesData}
     _throw_if_read_only(data.time_series_manager)
     for component in iterate_components_with_time_series(
@@ -316,6 +321,10 @@ function remove_time_series!(
             time_series_type = T,
             resolution = resolution,
         )
+            ts_interval = get_interval(ts_metadata)
+            if !isnothing(interval) && ts_interval != interval
+                continue
+            end
             remove_time_series!(data, component, ts_metadata)
         end
     end
@@ -708,7 +717,6 @@ function _check_transform_single_time_series(
         time_series_type = SingleTimeSeries,
         resolution = resolution,
     )
-    system_params = get_forecast_parameters(data.time_series_manager.metadata_store)
     components_with_params_and_metadata = NamedTuple[]
     for item in items
         params = _check_single_time_series_transformed_parameters(
@@ -716,6 +724,11 @@ function _check_transform_single_time_series(
             DeterministicSingleTimeSeries,
             horizon,
             interval,
+        )
+        system_params = get_forecast_parameters(
+            data.time_series_manager.metadata_store;
+            resolution = params.resolution,
+            interval = params.interval,
         )
         check_params_compatibility(system_params, params)
         component = get_component(data, item.owner_uuid)
@@ -1315,16 +1328,16 @@ function get_masked_component(data::SystemData, uuid::Base.UUID)
     return nothing
 end
 
-get_forecast_initial_times(data::SystemData) =
-    get_forecast_initial_times(data.time_series_manager.metadata_store)
-get_forecast_window_count(data::SystemData) =
-    get_forecast_window_count(data.time_series_manager.metadata_store)
-get_forecast_horizon(data::SystemData) =
-    get_forecast_horizon(data.time_series_manager.metadata_store)
-get_forecast_initial_timestamp(data::SystemData) =
-    get_forecast_initial_timestamp(data.time_series_manager.metadata_store)
-get_forecast_interval(data::SystemData) =
-    get_forecast_interval(data.time_series_manager.metadata_store)
+get_forecast_initial_times(data::SystemData; kwargs...) =
+    get_forecast_initial_times(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_window_count(data::SystemData; kwargs...) =
+    get_forecast_window_count(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_horizon(data::SystemData; kwargs...) =
+    get_forecast_horizon(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_initial_timestamp(data::SystemData; kwargs...) =
+    get_forecast_initial_timestamp(data.time_series_manager.metadata_store; kwargs...)
+get_forecast_interval(data::SystemData; kwargs...) =
+    get_forecast_interval(data.time_series_manager.metadata_store; kwargs...)
 
 get_time_series_resolutions(
     data::SystemData;
@@ -1334,8 +1347,16 @@ get_time_series_resolutions(
     time_series_type = time_series_type,
 )
 
-function get_forecast_total_period(data::SystemData)
-    params = get_forecast_parameters(data.time_series_manager.metadata_store)
+function get_forecast_total_period(
+    data::SystemData;
+    resolution::Union{Nothing, Dates.Period} = nothing,
+    interval::Union{Nothing, Dates.Period} = nothing,
+)
+    params = get_forecast_parameters(
+        data.time_series_manager.metadata_store;
+        resolution = resolution,
+        interval = interval,
+    )
     isnothing(params) && return Dates.Second(0)
     return get_total_period(
         params.initial_timestamp,
