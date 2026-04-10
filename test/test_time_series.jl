@@ -4835,6 +4835,69 @@ end
     ) == IS.get_data(sts)
 end
 
+@testset "Test ForecastCache with multiple intervals" begin
+    params = setup_for_multi_interval_tests()
+    component = params.component
+    f_name = params.f_name
+    initial_time = params.initial_time
+    interval1 = params.interval1
+    interval2 = params.interval2
+    f1 = params.forecast1
+    f2 = params.forecast2
+
+    horizon_count = length(first(values(IS.get_data(f1))))
+
+    # Cache with interval1 returns interval1 data
+    cache1 = IS.ForecastCache(
+        IS.Deterministic,
+        component,
+        f_name;
+        start_time = initial_time,
+        horizon_count = horizon_count,
+        interval = interval1,
+    )
+    ta1 = IS.get_time_series_array!(cache1, initial_time)
+    expected_vals1 = IS.get_data(f1)[initial_time]
+    @test TimeSeries.values(ta1) == expected_vals1
+
+    # Cache with interval2 returns interval2 data
+    cache2 = IS.ForecastCache(
+        IS.Deterministic,
+        component,
+        f_name;
+        start_time = initial_time,
+        horizon_count = horizon_count,
+        interval = interval2,
+    )
+    ta2 = IS.get_time_series_array!(cache2, initial_time)
+    expected_vals2 = IS.get_data(f2)[initial_time]
+    @test TimeSeries.values(ta2) == expected_vals2
+
+    # Values from different intervals are different
+    @test expected_vals1 != expected_vals2
+
+    # Cache without interval throws on ambiguous data
+    @test_throws ArgumentError IS.ForecastCache(
+        IS.Deterministic,
+        component,
+        f_name;
+        start_time = initial_time,
+        horizon_count = horizon_count,
+    )
+
+    # make_time_series_cache with interval works
+    cache3 = IS.make_time_series_cache(
+        IS.Deterministic,
+        component,
+        f_name,
+        initial_time,
+        horizon_count;
+        interval = interval1,
+    )
+    ta3 = IS.get_time_series_array!(cache3, initial_time)
+    @test TimeSeries.values(ta3) == expected_vals1
+end
+
 @testset "Test removals of time series with multiple resolutions" begin
     params = setup_for_multi_resolution_tests()
     for (ts_type, ts_name) in
