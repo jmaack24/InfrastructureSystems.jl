@@ -233,6 +233,10 @@ will return a TimeSeries.TimeArray covering one forecast window of length `horiz
   - `cache_size_bytes = TIME_SERIES_CACHE_SIZE_BYTES`: maximum size of data to keep in memory
   - `ignore_scaling_factors = false`: controls whether to ignore `scaling_factor_multiplier`
     in the time series instance
+  - `interval::Union{Nothing, Dates.Period} = nothing`: select among multiple forecasts
+    that share `(type, name)` but differ in interval.
+  - `resolution::Union{Nothing, Dates.Period} = nothing`: select among multiple forecasts
+    that share `(type, name)` but differ in resolution.
 """
 function ForecastCache(
     ::Type{T},
